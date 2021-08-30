@@ -1,0 +1,387 @@
+"""
+Created on Tue Jun 15 11:27:13 2021
+
+@author: sonny
+"""
+
+import rasterio as rio
+from osgeo import gdal, ogr, osr
+import geopandas as gpd
+import pandas as pd
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+from rasterio.mask import mask
+from bs4 import BeautifulSoup
+import folium 
+from shapely.geometry import Polygon
+
+print ("Collect metadata")
+
+#reading the xml  
+with open(r'D:\Sentineldata\S2B_MSIL2A_20210820T095029_N0301_R079_T33TWK_20210820T112641.SAFE\GRANULE\L2A_T33TWK_A023271_20210820T095028\MTD_TL.xml', 'r') as f:
+    data = f.read()
+  
+Bs_data = BeautifulSoup(data, 'xml')
+   
+#extract specific data 
+sensing = Bs_data.find('SENSING_TIME')
+  
+#convert into a pdDataFrame
+df = pd.DataFrame(sensing)
+
+#save the dataFrame as Csv
+df.to_csv(r'C:\\Users\\sonny\\Desktop\\IEST\\timestamp.csv')
+
+#call back as df3
+df3 = pd.read_csv(r'C:\\Users\\sonny\\Desktop\\IEST\\timestamp.csv')
+#create date columns
+df3_rename = df3.rename(columns={"0":"Datetime"})
+#rendering as a date time object
+df3_rename["Datetime"] = pd.to_datetime(df3_rename["Datetime"])
+df3_rename.to_csv(r'C:\\Users\\sonny\\Desktop\\IEST\\timestamp.csv')
+
+#extract metadata
+time = (df3_rename["Datetime"])
+timelipa = time.to_string()
+timelipa = timelipa.replace(" ", "")
+when = timelipa [1:11]
+
+print ("Working on data of " + when)
+
+'''print ("Start RGB")
+
+# Open Bands 4, 3 and 2 with Rasterio
+
+Raster = 'D:\Sentineldata\S2B_MSIL2A_20210621T095029_N0300_R079_T33TWK_20210621T113730.SAFE\GRANULE\L2A_T33TWK_A022413_20210621T095030\IMG_DATA\R10m'
+
+b4 = rio.open(Raster+'/T33TWK_20210621T095029_B04_10m.jp2')
+b3 = rio.open(Raster+'/T33TWK_20210621T095029_B03_10m.jp2')
+b2 = rio.open(Raster+'/T33TWK_20210621T095029_B02_10m.jp2')
+
+# Create an RGB image 
+with rio.open(when + 'RGB.tiff','w',driver='Gtiff', width=b4.width, height=b4.height, 
+              count=3,crs=b4.crs,transform=b4.transform, dtype=b4.dtypes[0]) as rgb:
+    rgb.write(b2.read(1),1) 
+    rgb.write(b3.read(1),2) 
+    rgb.write(b4.read(1),3) 
+    rgb.close()
+    
+
+#Clipping
+
+MyFolder = r'D:\\Iest sampler\\satellite images\\Lipa\\Uncut\\L1C_T33TWK_A020983_20210313T095029_2021-03-13_con\\'
+MyFileRoot = 'AOI.shp'
+fileName = os.path.join(MyFolder + MyFileRoot)
+AOI = gpd.read_file(fileName)
+
+AOI_proj = AOI.to_crs({'init': 'epsg:32633'})
+
+with rio.open(when + 'RGB.tiff') as src:
+    out_image, out_transform = rio.mask.mask(src,AOI_proj.geometry,crop=True)
+    out_meta = src.meta.copy()
+    out_meta.update({"driver": "GTiff",
+                 "height": out_image.shape[1],
+                 "width": out_image.shape[2],
+                 "transform": out_transform})
+    
+with rio.open(when + 'RGB_masked.tif', "w", **out_meta) as dest:
+    dest.write(out_image)
+print ('RGB done')'''
+
+print ("Start NDVI")
+
+Raster = 'D:\Sentineldata\S2B_MSIL2A_20210820T095029_N0301_R079_T33TWK_20210820T112641.SAFE\GRANULE\L2A_T33TWK_A023271_20210820T095028\IMG_DATA\R10m'
+
+# Open b4 and b8
+b4 = rio.open(Raster+'/T33TWK_20210820T095029_B04_10m.jp2')
+b8 = rio.open(Raster+'/T33TWK_20210820T095029_B08_10m.jp2')
+
+# read Red(b4) and NIR(b8) as arrays
+red = b4.read()
+nir = b8.read()
+
+# Calculate ndvi
+ndvi = (nir.astype(float)-red.astype(float))/(nir+red)
+
+# Write the NDVI image
+meta = b4.meta
+meta.update(driver='GTiff')
+meta.update(dtype=rio.float32)
+
+with rio.open(when + 'NDVI.tif', 'w', **meta) as dst:
+    dst.write(ndvi.astype(rio.float32))
+print ("NDVI done")
+    
+MyFolder = r'D:\\Iest sampler\\satellite images\\Lipa\\Uncut\\L1C_T33TWK_A020983_20210313T095029_2021-03-13_con\\'
+MyFileRoot = 'AOI.shp'
+fileName = os.path.join(MyFolder + MyFileRoot)
+AOI = gpd.read_file(fileName)
+
+AOI_proj = AOI.to_crs({'init': 'epsg:32633'})
+
+#clipping extent
+with rio.open(when + "NDVI.tif") as src:
+    out_image, out_transform = rio.mask.mask(src,AOI_proj.geometry,crop=True)
+    out_meta = src.meta.copy()
+    out_meta.update({"driver": "GTiff",
+                 "height": out_image.shape[1],
+                 "width": out_image.shape[2],
+                 "transform": out_transform})
+    
+with rio.open(when + "NDVI_masked.tif", "w", **out_meta) as dest:
+    dest.write(out_image)
+    
+MyFolder = r'D:\\Cascata\\'
+MyImageRoot = when + 'NDVI.tif'
+rem = os.remove(MyFolder + MyImageRoot)
+       
+''' resample '''
+
+print ("Resampling")
+#Import raster
+MyFolder = r'D:\\Cascata\\'
+MyImageRoot = when + 'NDVI_masked.tif'
+fileName1 = os.path.join(MyFolder + MyImageRoot)
+ds = gdal.Open (fileName1)
+array = ds.GetRasterBand(1).ReadAsArray()
+
+#output location
+path = r'D:\\Cascata\\'
+output = path + when + "Reclass.tif"
+
+#options
+xres=2
+yres=2
+resample_alg = 'near'
+
+#algorithm
+dsRes = gdal.Warp(output, ds, xRes = xres, yRes = yres, resampleAlg = resample_alg)
+array = ds.GetRasterBand(1).ReadAsArray()
+plt.imshow(array)
+print ("Resample done")
+
+
+''' Binmask '''
+
+print ("Binmask start")
+
+#Import raster
+MyFolder = r'D:\\Cascata\\'
+MyImageRoot = when + 'Reclass.tif'
+fileName1 = os.path.join(MyFolder + MyImageRoot)
+ds = gdal.Open (fileName1)
+gt = ds.GetGeoTransform()
+proj = ds.GetProjection()
+band = ds.GetRasterBand(1)
+array = band.ReadAsArray()
+
+#Calculation
+binmask = np.where( (array > 0.0) & (array < 0.2), 1,0 )
+
+#Plot
+plt.figure()
+plt.imshow(binmask)
+
+#save new file
+SavedClass = os.path.join(MyFolder + when + 'Binmask.tif')
+driver = gdal.GetDriverByName("GTiff")
+driver.Register()
+outds = driver.Create( SavedClass, xsize = binmask.shape[1], 
+                      ysize = binmask.shape [0], bands = 1, 
+                      eType = gdal.GDT_Int16)
+
+outds.SetGeoTransform(gt)
+outds.SetProjection(proj)
+outband = outds.GetRasterBand(1)
+outband.WriteArray(binmask)
+outband.SetNoDataValue(np.nan)
+outband.FlushCache()
+
+outband = None
+outds = None
+
+print ("Binmaskdone")
+
+
+MyFolder = r'D:\\Cascata\\'
+MyImageRoot = when + 'NDVI_masked.tif'
+rem = os.remove(MyFolder + MyImageRoot)
+
+''' Vectoridze '''
+
+print ("Start transformation into vector")
+
+#Import raster
+MyFolder = r'D:\\Cascata\\'
+MyImageRoot = when + 'Binmask.tif'
+raster_path = os.path.join(MyFolder + MyImageRoot)
+raster = gdal.Open(raster_path)
+band = raster.GetRasterBand(1) 
+
+#set coordinate system
+srs = osr.SpatialReference()
+srs.ImportFromWkt(raster.GetProjectionRef())
+
+path = r'D:\\Cascata\\'
+#convert into shapefile
+drv = ogr.GetDriverByName('ESRI Shapefile')
+outfile = drv.CreateDataSource(path + when + 'Lipa.shp') 
+outlayer = outfile.CreateLayer('Lipa Now', srs )
+newField = ogr.FieldDefn('DN', ogr.OFTReal)
+outlayer.CreateField(newField)
+
+#algorithm 
+gdal.Polygonize(band, None, outlayer, 0, [], callback=None)
+outfile = None
+
+path = r'D:\\Cascata\\'
+shapefile = gpd.read_file(path + when + 'Lipa.shp')
+shapefile.plot( column= "DN", cmap= "Blues" )
+plt.show()
+
+print ("Vector done")
+
+
+''' $area '''
+
+print ("Calculate area")
+
+df = gpd.read_file(path + when + 'Lipa.shp')
+
+#calculate the area of the polygon 
+
+df['Area(m2)'] = df.area
+
+#export as shp
+
+df.to_file (path + when + 'Lipa.shp')
+
+'''Final representation'''
+
+print ("Filtering and dataset")
+
+final_layer = gpd.read_file(path + when + 'Lipa.shp')
+
+#cut the real area value and erase the distortion
+
+final_layer.plot(column= "DN", cmap= "rainbow")
+
+cutoff = final_layer[(final_layer["Area(m2)"] > 2000) & (final_layer["DN"] >0 )]
+print (cutoff)        
+
+cutoff.to_file (path + when + 'Lipa.shp')
+cutoff.plot(column="DN", cmap= "rainbow")
+
+cutoff = gpd.read_file(path + when + 'Lipa.shp')
+
+#csv with data to join
+df = pd.read_csv(r'C:\\Users\\sonny\\Desktop\\IEST\\Matrix.csv')
+mergedfile = cutoff.merge(df, on='DN')
+
+mergedfile.to_file(path + when + 'Lipa.shp')
+
+print ("Simplify polygon")
+
+Lipa = gpd.read_file(path + when + 'Lipa.shp')
+
+Lipa["geometry"] = Lipa.simplify(tolerance = 20, preserve_topology=bool)
+
+Lipa.plot()
+Lipa.to_file(path + when + 'Lipa.shp')
+
+'''Merging Metadata'''
+
+path = r'D:\\Cascata\\'
+
+#merge and transform in geojson
+
+Lipa = gpd.read_file(path + when + 'Lipa.shp')
+Lipa.to_file(r'D:\\Cascata\\Lipa', driver='GeoJSON')
+
+timelapse = pd.read_csv(r'C:\\Users\\sonny\\Desktop\\IEST\\timestamp.csv')
+
+mergedfile = Lipa.merge(timelapse, how="cross")
+
+mergedfile.to_file(path + when + 'Lipa', driver='GeoJSON')
+
+'''Erase distortion'''
+
+data = gpd.read_file(path + when + 'Lipa')
+num_rows = data.shape[0]
+
+if num_rows > 1:
+ print ("Erasing distortion")
+ polygon = Polygon([(584701.7,4950435.8), (584924.0,4950549.5), (585404.0,4950117.5), (585141.3,4949912.9)])
+ poly_gdf = gpd.GeoDataFrame([1], geometry=[polygon], crs=data.crs)
+ lipaClean = gpd.clip(data, polygon, keep_geom_type=True)
+ lipaClean.to_file(path + when + 'Lipa', driver='GeoJSON')
+ 
+else:
+     print ("Erasing distortion unecessary")
+
+     
+'''
+MyFolder = r'D:\\Cascata\\'
+MyImageRoot = when + 'Lipa.shp'
+rem = os.remove(MyFolder + MyImageRoot)
+
+MyFolder = r'D:\\Cascata\\'
+MyImageRoot = when + 'Lipa'
+rem = os.remove(MyFolder + MyImageRoot)
+
+MyFolder = r'D:\\Cascata\\'
+MyImageRoot = when + 'Reclass.tif'
+rem = os.remove(MyFolder + MyImageRoot)
+
+MyFolder = r'D:\\Cascata\\'
+MyImageRoot = when + 'Binmask.tif'
+rem = os.remove(MyFolder + MyImageRoot)
+     
+'''     
+
+#merging in the final file
+data2 = gpd.read_file(path + when + 'Lipa')
+data2.plot() 
+
+data1 = gpd.read_file(r'D:\Cascata\LipaTimelapse')
+
+#for the first time remove variation and change only the name of data2 shp
+
+variation = data1.append(data2)
+variation.to_file(r'D:\Cascata\LipaTimelapse', driver='GeoJSON')
+
+print ("Nice to meet you")
+
+#Printing
+
+from folium.features import Choropleth
+
+MyFolder = r'D:\\Iest sampler\\satellite images\\Lipa\\Uncut\\L1C_T33TWK_A020983_20210313T095029_2021-03-13_con\\'
+MyFileRoot = 'AOI.shp'
+fileName = os.path.join(MyFolder + MyFileRoot)
+AOI = gpd.read_file(fileName)
+
+Lipa = gpd.read_file(r'D:\Cascata\LipaTimelapse')
+New = gpd.read_file(path + when + 'Lipa')
+
+m = folium.Map([44.701, 16.07], zoom_start=15)
+g = Choropleth(geo_data = Lipa, columns='Datetime', fill_color='Red', bins=6, fill_opacity=0.6, 
+               legend_name='Lipa Timelapse',line_color='black', line_weight=1, line_opacity=1).add_to(m) 
+folium.GeoJson(AOI).add_to(m)
+#f = Choropleth(geo_data = New, fill_color='Red', bins=6, fill_opacity=0.1, line_color='green', line_weight=3, line_opacity=1).add_to(m)
+
+render = m.save("LipaPlot.html")
+
+
+
+
+
+
+
+
+
+
+
+
+
